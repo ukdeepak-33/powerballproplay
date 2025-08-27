@@ -300,7 +300,9 @@ def _generate_from_vae():
         return "Models are not ready. Please check server logs."
 
     # Sample a point from the latent space
-    z_sample = np.random.normal(size=(1, vae_encoder.layers[-1].output_shape[-1]))
+    # The VAE encoder's output shape is a list, we need the shape of the last element
+    latent_dim = vae_encoder.output_shape[2][1]
+    z_sample = np.random.normal(size=(1, latent_dim))
 
     # Decode the sample to a feature vector
     decoded_vector = vae_model.predict(z_sample)
