@@ -3,52 +3,54 @@ import numpy as np
 import joblib
 import os
 from sklearn.ensemble import RandomForestClassifier
+import traceback
 
 # --- File Paths ---
-# Get the absolute path to the directory containing this file
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# Set the path to the templates folder, one directory up
 TEMPLATE_DIR = os.path.join(BASE_DIR, '..', 'templates')
-# Define the path for the saved model file
 MODEL_PATH = "model.pkl"
 
-# --- Model Loading and Training Logic ---
-def train_and_save_model():
+# --- Global Model Variable ---
+# Initialize the model as None. It will be loaded/trained later.
+model = None
+
+# --- Model Loading and Training Function ---
+def load_or_train_model():
     """
-    Trains a simple RandomForestClassifier and saves it to a file.
-    This function is called only if the model file does not exist.
+    Handles the loading and training of the ML model.
+    This function is called by the Flask application itself.
     """
-    print("Training a new model...")
-    # Create a fake dataset for demonstration purposes
-    # X represents 5 white balls (1-69), y is the Powerball (1-26)
-    X = np.random.randint(1, 70, size=(500, 5))
-    y = np.random.randint(1, 27, size=(500,))
-
-    # Initialize and train the classifier
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X, y)
-
-    # Save the trained model to the file system
-    joblib.dump(model, MODEL_PATH)
-    print("Model trained and saved.")
-    return model
-
-# Check for the model file and load it, or train a new one
-# This code runs as soon as the app.py file is imported by gunicorn
-try:
-    if os.path.exists(MODEL_PATH):
-        print("Loading existing model...")
-        model = joblib.load(MODEL_PATH)
-    else:
-        print("Model file not found. Starting training process...")
-        model = train_and_save_model()
-except Exception as e:
-    print(f"Error during model loading/training: {e}")
-    # Set model to None so the API endpoint can handle the error gracefully
-    model = None
+    global model
+    try:
+        if os.path.exists(MODEL_PATH):
+            print("Loading existing model...")
+            model = joblib.load(MODEL_PATH)
+            print("Model loaded successfully.")
+        else:
+            print("Model file not found. Starting training process...")
+            # Create a fake dataset for demonstration
+            X = np.random.randint(1, 70, size=(500, 5))
+            y = np.random.randint(1, 27, size=(500,))
+            
+            # Initialize and train the classifier
+            trained_model = RandomForestClassifier(n_estimators=100, random_state=42)
+            trained_model.fit(X, y)
+            
+            # Save the trained model to the file system
+            joblib.dump(trained_model, MODEL_PATH)
+            model = trained_model
+            print("Model trained and saved.")
+    except Exception as e:
+        print(f"FATAL ERROR during model loading/training: {e}")
+        traceback.print_exc()
+        model = None
 
 # --- Flask App Initialization ---
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
+
+# Call the model loading function as soon as the app is created
+# This ensures the model is ready before any requests are handled
+load_or_train_model()
 
 # --- Routes ---
 @app.route("/")
@@ -73,9 +75,10 @@ def generate_ml_numbers():
         X_new = np.random.randint(1, 70, size=(1, 5))
 
         # Predict the Powerball number using the model
+        # Cast the result to a standard Python int
         predicted_powerball = int(model.predict(X_new)[0])
 
-        # Sort the white balls for a clean output and cast to standard integers
+        # Sort the white balls and cast them to standard Python integers
         white_balls = sorted(list(X_new[0].astype(int)))
 
         return jsonify({
@@ -84,6 +87,7 @@ def generate_ml_numbers():
             "powerball": predicted_powerball
         })
     except Exception as e:
-        # Handle any runtime errors during prediction
+        # Catch any runtime errors and provide a clear message
         print(f"Error during number generation: {e}")
+        traceback.print_exc()
         return jsonify({"success": False, "message": "An error occurred during number generation."}), 500
