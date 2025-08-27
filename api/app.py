@@ -339,6 +339,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Construct the path to the templates directory, which is one level up
 TEMPLATE_DIR = os.path.join(BASE_DIR, '..', 'templates')
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
+app.secret_key = 'powerball_pro_play'
 
 # --- API Endpoints ---
 @app.route('/')
