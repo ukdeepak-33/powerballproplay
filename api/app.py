@@ -334,8 +334,11 @@ def _generate_from_vae():
     return sorted(generated_balls) + [pb]
 
 # --- Flask App Initialization ---
-app = Flask(__name__, template_folder='templates')
-app.secret_key = 'powerball_pro_play'
+# Get the absolute path to the directory containing this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Construct the path to the templates directory, which is one level up
+TEMPLATE_DIR = os.path.join(BASE_DIR, '..', 'templates')
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
 # --- API Endpoints ---
 @app.route('/')
