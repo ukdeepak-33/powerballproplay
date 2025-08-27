@@ -8,6 +8,9 @@ from tensorflow.keras.layers import Input, Dense, Lambda
 from tensorflow.keras import backend as K
 import json
 import traceback
+import pandas as pd  # <-- ADDED THIS LINE
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
 
 # --- File Paths ---
 # Get the absolute path to the directory containing this file
@@ -107,8 +110,8 @@ def load_or_train_model():
             print("Models loaded successfully.")
         else:
             print("Model files not found. Starting VAE training...")
+            
             # Scale the features for training
-            from sklearn.preprocessing import StandardScaler
             scaler_model = StandardScaler()
             X_scaled = scaler_model.fit_transform(feature_df)
             
