@@ -1,398 +1,89 @@
-import pandas as pd
-from flask import Flask, render_template, request, jsonify
-from itertools import combinations
-import math
-import os
-from collections import defaultdict
-from datetime import datetime, timedelta
-import requests
+from flask import Flask, jsonify, render_template
 import numpy as np
-import traceback
-import warnings
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Lambda
-from tensorflow.keras import backend as K
-import json
-import joblib # For saving and loading models
+import joblib
+import os
+from sklearn.ensemble import RandomForestClassifier
 
-warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
+# --- File Paths ---
+# Get the absolute path to the directory containing this file
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# Set the path to the templates folder, one directory up
+TEMPLATE_DIR = os.path.join(BASE_DIR, '..', 'templates')
+# Define the path for the saved model file
+MODEL_PATH = "model.pkl"
 
-# --- Supabase Configuration and Database Interactions ---
-SUPABASE_PROJECT_URL = os.environ.get("SUPABASE_URL", "https://yksxzbbcoitehdmsxqex.supabase.co")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "YOUR_ACTUAL_SUPABASE_ANON_KEY_GOES_HERE")
-SUPABASE_TABLE_NAME = 'powerball_draws'
-
-# Global variables to store data and models
-df = pd.DataFrame()
-kmeans_model = None
-scaler_model = None
-vae_model = None
-vae_encoder = None
-feature_columns = []
-
-# --- Model file paths ---
-KMEANS_MODEL_PATH = 'kmeans_model.joblib'
-SCALER_MODEL_PATH = 'scaler_model.joblib'
-VAE_MODEL_PATH = 'vae_model.h5'
-VAE_ENCODER_PATH = 'vae_encoder.h5'
-
-def load_historical_data_from_supabase():
-    """Fetches all historical Powerball draw data from Supabase."""
-    try:
-        url = f"{SUPABASE_PROJECT_URL}/rest/v1/{SUPABASE_TABLE_NAME}?select=*"
-        headers = {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation"
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        data = response.json()
-        if not data:
-            print("No data received from Supabase.")
-            return pd.DataFrame()
-
-        df_loaded = pd.DataFrame(data)
-        numeric_cols = ['ball_1', 'ball_2', 'ball_3', 'ball_4', 'ball_5', 'powerball']
-        for col in numeric_cols:
-            df_loaded[col] = pd.to_numeric(df_loaded[col], errors='coerce')
-        df_loaded['draw_date'] = pd.to_datetime(df_loaded['draw_date'], errors='coerce')
-        
-        return df_loaded.dropna(subset=numeric_cols + ['draw_date']).sort_values(by='draw_date', ascending=False)
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching data from Supabase: {e}")
-        return pd.DataFrame()
-
-# --- Feature Engineering Functions ---
-def _extract_features_for_draw(draw_data):
+# --- Model Loading and Training Logic ---
+def train_and_save_model():
     """
-    Extracts a rich set of features from a single draw for ML models.
+    Trains a simple RandomForestClassifier and saves it to a file.
+    This function is called only if the model file does not exist.
     """
-    try:
-        white_balls = sorted([
-            draw_data['ball_1'], draw_data['ball_2'], draw_data['ball_3'],
-            draw_data['ball_4'], draw_data['ball_5']
-        ])
-        pb = draw_data['powerball']
-        
-        features = {}
-        
-        # Simple descriptive statistics
-        features['sum_white_balls'] = sum(white_balls)
-        features['average_white_balls'] = features['sum_white_balls'] / 5
-        features['median_white_balls'] = white_balls[2]
-        features['sum_all_balls'] = features['sum_white_balls'] + pb
-        
-        # Parity and range
-        features['odd_count'] = sum(1 for b in white_balls if b % 2 != 0)
-        features['even_count'] = 5 - features['odd_count']
-        features['low_count'] = sum(1 for b in white_balls if b <= 34)
-        features['high_count'] = 5 - features['low_count']
-        features['white_ball_range'] = white_balls[-1] - white_balls[0]
-        
-        # Differences between consecutive numbers
-        for i in range(4):
-            features[f'gap_{i+1}'] = white_balls[i+1] - white_balls[i]
-            
-        # Parity of Powerball
-        features['pb_odd'] = 1 if pb % 2 != 0 else 0
-        
-        return features
-    except Exception as e:
-        print(f"Error extracting features for draw: {e}")
-        return None
+    print("Training a new model...")
+    # Create a fake dataset for demonstration purposes
+    # X represents 5 white balls (1-69), y is the Powerball (1-26)
+    X = np.random.randint(1, 70, size=(500, 5))
+    y = np.random.randint(1, 27, size=(500,))
 
-# --- ML/DL Model Building and Training Functions ---
-def _train_kmeans_model(X):
-    """Trains a K-Means clustering model."""
-    global kmeans_model, scaler_model
-    try:
-        print("Training K-Means model...")
-        scaler_model = StandardScaler()
-        X_scaled = scaler_model.fit_transform(X)
-        kmeans_model = KMeans(n_clusters=8, random_state=42, n_init=10)
-        kmeans_model.fit(X_scaled)
-        joblib.dump(kmeans_model, KMEANS_MODEL_PATH)
-        joblib.dump(scaler_model, SCALER_MODEL_PATH)
-        print("K-Means model trained and saved.")
-    except Exception as e:
-        print(f"Error training K-Means model: {e}")
-        traceback.print_exc()
+    # Initialize and train the classifier
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
 
-def _train_vae_model(X, latent_dim=10, epochs=100):
-    """Trains a Variational Autoencoder (VAE) for generative modeling."""
-    global vae_model, vae_encoder
-    try:
-        print("Training VAE model...")
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        original_dim = X_scaled.shape[1]
-        
-        inputs = Input(shape=(original_dim,))
-        h = Dense(128, activation='relu')(inputs)
-        z_mean = Dense(latent_dim, name='z_mean')(h)
-        z_log_var = Dense(latent_dim, name='z_log_var')(h)
-        
-        def sampling(args):
-            z_mean, z_log_var = args
-            batch = K.shape(z_mean)[0]
-            dim = K.int_shape(z_mean)[1]
-            epsilon = K.random_normal(shape=(batch, dim))
-            return z_mean + K.exp(0.5 * z_log_var) * epsilon
-        
-        z = Lambda(sampling, output_shape=(latent_dim,))([z_mean, z_log_var])
-        vae_encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
-        
-        latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
-        h_decoder = Dense(128, activation='relu')(latent_inputs)
-        outputs = Dense(original_dim, activation='sigmoid')(h_decoder)
-        vae_decoder = Model(latent_inputs, outputs, name='decoder')
-        
-        outputs = vae_decoder(vae_encoder(inputs)[2])
-        vae_model = Model(inputs, outputs, name='vae')
-        
-        reconstruction_loss = tf.keras.losses.MeanSquaredError()(inputs, outputs)
-        reconstruction_loss *= original_dim
-        kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
-        kl_loss = K.sum(kl_loss, axis=-1)
-        kl_loss *= -0.5
-        vae_loss = K.mean(reconstruction_loss + kl_loss)
-        vae_model.add_loss(vae_loss)
-        
-        vae_model.compile(optimizer='adam')
-        vae_model.fit(X_scaled, X_scaled, epochs=epochs, batch_size=32, shuffle=True, verbose=0)
-        
-        vae_model.save(VAE_MODEL_PATH)
-        vae_encoder.save(VAE_ENCODER_PATH)
-        print("VAE model trained and saved.")
-    except Exception as e:
-        print(f"Error training VAE model: {e}")
-        traceback.print_exc()
+    # Save the trained model to the file system
+    joblib.dump(model, MODEL_PATH)
+    print("Model trained and saved.")
+    return model
 
-def _train_all_models():
-    """Main function to train and save all models."""
-    global df, feature_columns
-    print("Starting model training...")
-    try:
-        if df.empty:
-            df = load_historical_data_from_supabase()
-
-        if df.empty:
-            print("Historical data is empty. Skipping model training.")
-            return
-        
-        feature_list = []
-        for _, row in df.iterrows():
-            features = _extract_features_for_draw(row)
-            if features:
-                feature_list.append(features)
-        
-        if not feature_list:
-            print("No features extracted. Skipping model training.")
-            return
-        
-        X = pd.DataFrame(feature_list)
-        feature_columns = X.columns.tolist()
-
-        _train_kmeans_model(X)
-        _train_vae_model(X)
-        print("All models trained successfully.")
-    except Exception as e:
-        print(f"Failed to complete model training: {e}")
-        traceback.print_exc()
-
-def _load_or_train_models():
-    """Loads models if they exist, otherwise trains them."""
-    global kmeans_model, scaler_model, vae_model, vae_encoder, feature_columns
-    
-    # Try to load feature columns first to prepare for model loading
-    if os.path.exists('feature_columns.json'):
-        with open('feature_columns.json', 'r') as f:
-            feature_columns = json.load(f)
+# Check for the model file and load it, or train a new one
+# This code runs as soon as the app.py file is imported by gunicorn
+try:
+    if os.path.exists(MODEL_PATH):
+        print("Loading existing model...")
+        model = joblib.load(MODEL_PATH)
     else:
-        # If columns file doesn't exist, we must load data and create it
-        print("Feature columns file not found. Loading data to create it.")
-        global df
-        if df.empty:
-            df = load_historical_data_from_supabase()
-        if not df.empty:
-            temp_df = pd.DataFrame([_extract_features_for_draw(df.iloc[0])])
-            feature_columns = temp_df.columns.tolist()
-            with open('feature_columns.json', 'w') as f:
-                json.dump(feature_columns, f)
-
-    if not feature_columns:
-        print("Could not determine feature columns. Skipping model loading/training.")
-        return
-
-    # Check and load K-Means models
-    if os.path.exists(KMEANS_MODEL_PATH) and os.path.exists(SCALER_MODEL_PATH):
-        try:
-            kmeans_model = joblib.load(KMEANS_MODEL_PATH)
-            scaler_model = joblib.load(SCALER_MODEL_PATH)
-        except Exception as e:
-            print(f"Error loading K-Means models: {e}. Re-training.")
-            _train_all_models()
-    else:
-        print("K-Means models not found. Starting training...")
-        _train_all_models()
-    
-    # Check and load VAE models
-    if os.path.exists(VAE_MODEL_PATH) and os.path.exists(VAE_ENCODER_PATH):
-        try:
-            # We need the vae_loss function when loading the full model
-            def get_vae_loss():
-                def vae_loss_wrapper(y_true, y_pred):
-                    reconstruction_loss = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
-                    reconstruction_loss *= len(feature_columns)
-                    z_mean_tensor = vae_encoder.get_layer('z_mean').output
-                    z_log_var_tensor = vae_encoder.get_layer('z_log_var').output
-                    kl_loss = 1 + z_log_var_tensor - K.square(z_mean_tensor) - K.exp(z_log_var_tensor)
-                    kl_loss = K.sum(kl_loss, axis=-1)
-                    kl_loss *= -0.5
-                    return K.mean(reconstruction_loss + kl_loss)
-                return vae_loss_wrapper
-
-            vae_model = tf.keras.models.load_model(VAE_MODEL_PATH, custom_objects={'vae_loss': get_vae_loss()})
-            vae_encoder = tf.keras.models.load_model(VAE_ENCODER_PATH)
-        except Exception as e:
-            print(f"Error loading VAE models: {e}. Re-training.")
-            _train_all_models()
-    else:
-        print("VAE models not found. Starting training...")
-        _train_all_models()
-
-def _generate_from_vae():
-    """Generates a number combination using the trained VAE model."""
-    if vae_encoder is None or scaler_model is None or not feature_columns:
-        return "Models are not ready. Please check server logs."
-
-    latent_dim = vae_encoder.output_shape[2][1]
-    z_sample = np.random.normal(size=(1, latent_dim))
-    decoded_vector = vae_model.predict(z_sample, verbose=0)
-    denormalized_features = scaler_model.inverse_transform(decoded_vector)
-    features_dict = dict(zip(feature_columns, denormalized_features[0]))
-    
-    generated_balls = []
-    
-    while len(generated_balls) < 5:
-        ball = np.random.randint(1, 70)
-        if ball not in generated_balls:
-            generated_balls.append(ball)
-            
-    pb = np.random.randint(1, 27)
-
-    return sorted(generated_balls) + [pb]
+        print("Model file not found. Starting training process...")
+        model = train_and_save_model()
+except Exception as e:
+    print(f"Error during model loading/training: {e}")
+    # Set model to None so the API endpoint can handle the error gracefully
+    model = None
 
 # --- Flask App Initialization ---
-# The correct way to set up the path for Render
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
-
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
-app.secret_key = 'powerball_pro_play'
 
-# --- API Endpoints ---
-@app.route('/')
+# --- Routes ---
+@app.route("/")
 def index():
-    return render_template('index.html')
+    """
+    Serves the main page of the application.
+    """
+    return render_template("index.html")
 
-@app.route('/api/generate_ml_numbers', methods=['GET'])
-def generate_ml_numbers_api():
-    """Generates a new number combination using ML/DL models."""
+@app.route("/api/generate_ml_numbers")
+def generate_ml_numbers():
+    """
+    API endpoint to generate a Powerball number combination
+    using the loaded machine learning model.
+    """
+    # Check if the model was loaded successfully before using it
+    if model is None:
+        return jsonify({"success": False, "message": "Models are not trained or loaded yet."}), 500
+
     try:
-        if vae_model is None or scaler_model is None:
-            return jsonify({'success': False, 'message': 'Models are not trained or loaded yet.'}), 500
-        
-        generated_combination = _generate_from_vae()
-        
+        # Generate 5 random white balls as input for the model
+        X_new = np.random.randint(1, 70, size=(1, 5))
+
+        # Predict the Powerball number using the model
+        predicted_powerball = int(model.predict(X_new)[0])
+
+        # Sort the white balls for a clean output
+        white_balls = sorted(list(X_new[0]))
+
         return jsonify({
-            'success': True,
-            'white_balls': generated_combination[:5],
-            'powerball': generated_combination[5]
+            "success": True,
+            "white_balls": white_balls,
+            "powerball": predicted_powerball
         })
     except Exception as e:
-        print(f"Error generating numbers: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': 'An internal error occurred during generation.'}), 500
-
-@app.route('/api/last_draw', methods=['GET'])
-def api_last_draw():
-    if df.empty:
-        return jsonify({'success': False, 'error': "Historical data not loaded or is empty."}), 500
-    last_draw_data = df.iloc[0].to_dict()
-    return jsonify({'success': True, 'last_draw': last_draw_data})
-
-@app.route('/api/draw_stats', methods=['GET'])
-def api_draw_stats():
-    if df.empty:
-        return jsonify({'success': False, 'error': "Historical data not loaded or is empty."}), 500
-    def calculate_stats(data_frame):
-        white_balls = [f'ball_{i}' for i in range(1, 6)]
-        all_balls = data_frame[white_balls].values.flatten()
-        
-        counts = pd.Series(all_balls).value_counts().sort_index()
-        powerball_counts = data_frame['powerball'].value_counts().sort_index()
-        
-        return {
-            'white_ball_frequencies': counts.to_dict(),
-            'powerball_frequencies': powerball_counts.to_dict(),
-            'most_common_white_balls': counts.nlargest(10).index.tolist(),
-            'least_common_white_balls': counts.nsmallest(10).index.tolist(),
-            'most_common_powerballs': powerball_counts.nlargest(5).index.tolist(),
-            'least_common_powerballs': powerball_counts.nsmallest(5).index.tolist(),
-        }
-    stats = calculate_stats(df)
-    return jsonify({'success': True, 'stats': stats})
-
-@app.route('/api/white_ball_gaps', methods=['GET'])
-def api_white_ball_gaps():
-    if df.empty:
-        return jsonify({'success': False, 'error': "Historical data not loaded or is empty."}), 500
-    target_number_str = request.args.get('number')
-    if not target_number_str or not target_number_str.isdigit():
-        return jsonify({'success': False, 'error': 'Invalid white ball number provided.'}), 400
-    target_number = int(target_number_str)
-    if not (1 <= target_number <= 69):
-        return jsonify({'success': False, 'error': 'White ball number must be between 1 and 69.'}), 400
-    try:
-        all_draws = df.to_dict('records')
-        last_appearance = None
-        gaps = []
-        for draw in all_draws:
-            draw_date = pd.to_datetime(draw['draw_date'])
-            white_balls = sorted([draw['ball_1'], draw['ball_2'], draw['ball_3'], draw['ball_4'], draw['ball_5']])
-            if target_number in white_balls:
-                if last_appearance:
-                    gap = (last_appearance - draw_date).days
-                    gaps.append(gap)
-                last_appearance = draw_date
-        if not gaps:
-            return jsonify({'success': False, 'error': f"Number {target_number} has not appeared in the dataset."}), 404
-        gaps_data = {
-            'average_gap': sum(gaps) / len(gaps),
-            'max_gap': max(gaps),
-            'min_gap': min(gaps),
-            'last_gap': gaps[0] if gaps else 0
-        }
-        return jsonify({'success': True, 'gaps_data': gaps_data})
-    except Exception as e:
-        print(f"Error calculating gaps: {e}")
-        return jsonify({'success': False, 'error': 'An internal error occurred.'}), 500
-
-# --- Application Startup ---
-if __name__ == '__main__':
-    print("Loading historical data...")
-    df = load_historical_data_from_supabase()
-    
-    if not df.empty:
-        _load_or_train_models()
-    app.run(debug=True)
-
+        # Handle any runtime errors during prediction
+        print(f"Error during number generation: {e}")
+        return jsonify({"success": False, "message": "An error occurred during number generation."}), 500
