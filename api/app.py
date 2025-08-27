@@ -75,8 +75,8 @@ def generate_ml_numbers():
         # Predict the Powerball number using the model
         predicted_powerball = int(model.predict(X_new)[0])
 
-        # Sort the white balls for a clean output
-        white_balls = sorted(list(X_new[0]))
+        # Sort the white balls for a clean output and cast to standard integers
+        white_balls = sorted(list(X_new[0].astype(int)))
 
         return jsonify({
             "success": True,
