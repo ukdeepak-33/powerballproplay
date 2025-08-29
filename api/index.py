@@ -625,62 +625,6 @@ def calculate_combinations(n, k):
         return 0
     return math.comb(n, k)
 
-def winning_probability(white_ball_range_tuple, powerball_range_tuple):
-    """Calculates the odds of winning Powerball given specified ranges."""
-    total_white_balls_in_range = white_ball_range_tuple[1] - white_ball_range_tuple[0] + 1
-    white_ball_combinations = calculate_combinations(total_white_balls_in_range, 5)
-
-    total_powerballs_in_range = powerball_range_tuple[1] - powerball_range_tuple[0] + 1
-
-    total_combinations = white_ball_combinations * total_powerballs_in_range
-
-    probability_1_in_x = f"1 in {total_combinations:,}" if total_combinations > 0 else "N/A"
-    probability_percentage = f"{1 / total_combinations * 100:.10f}%" if total_combinations > 0 else "N/A"
-
-    return probability_1_in_x, probability_percentage
-
-def partial_match_probabilities(white_ball_range_tuple, powerball_range_tuple):
-    """Calculates probabilities for partial Powerball matches."""
-    total_white_balls_in_range = white_ball_range_tuple[1] - white_ball_range_tuple[0] + 1
-    total_powerballs_in_range = powerball_range_tuple[1] - powerball_range_tuple[0] + 1
-
-    probabilities = {}
-
-    prizes = {
-        "Match 5 White Balls + Powerball": {"matched_w": 5, "unmatched_w": 0, "matched_p": 1},
-        "Match 5 White Balls Only": {"matched_w": 5, "unmatched_w": 0, "matched_p": 0},
-        "Match 4 White Balls + Powerball": {"matched_w": 4, "unmatched_w": 1, "matched_p": 1},
-        "Match 4 White Balls Only": {"matched_w": 4, "unmatched_w": 1, "matched_p": 0},
-        "Match 3 White Balls + Powerball": {"matched_w": 3, "unmatched_w": 2, "matched_p": 1},
-        "Match 3 White Balls Only": {"matched_w": 3, "unmatched_w": 2, "matched_p": 0},
-        "Match 2 White Balls + Powerball": {"matched_w": 2, "unmatched_w": 3, "matched_p": 1},
-        "Match 1 White Ball + Powerball": {"matched_w": 1, "unmatched_w": 4, "matched_p": 1},
-        "Match Powerball Only": {"matched_w": 0, "unmatched_w": 5, "matched_p": 1},
-    }
-
-    for scenario, data in prizes.items():
-        comb_matched_w = calculate_combinations(5, data["matched_w"])
-        comb_unmatched_w = calculate_combinations(total_white_balls_in_range - 5, data["unmatched_w"])
-
-        if data["matched_p"] == 1:
-            comb_p = 1
-        else:
-            comb_p = total_powerballs_in_range - 1
-            if comb_p < 0:
-                comb_p = 0
-        
-        numerator = comb_matched_w * comb_unmatched_w * comb_p
-        
-        if numerator == 0:
-            probabilities[scenario] = "N/A"
-        else:
-            total_possible_combinations_for_draw = calculate_combinations(total_white_balls_in_range, 5) * total_powerballs_in_range
-            
-            probability = total_possible_combinations_for_draw / numerator
-            probabilities[scenario] = f"{probability:,.0f} to 1"
-
-    return probabilities
-
 def find_last_draw_dates_for_numbers(df_source, white_balls, powerball):
     """Finds the last draw date for each given number."""
     if df_source.empty: return {}
@@ -3942,15 +3886,6 @@ def positional_analysis_route():
         return jsonify(positional_data)
     else:
         return render_template('positional_analysis.html', positional_data=positional_data)
-
-@app.route('/ai_assistant')
-def ai_assistant_route():
-    try:
-        return render_template('ai_assistant.html')
-    except Exception as e:
-        traceback.print_exc()
-        flash("An error occurred loading the AI Assistant page. Please try again.", 'error')
-        return redirect(url_for('index'))
 
 # --- CUSTOM COMBINATIONS ROUTE (Corrected to fix data passing) ---
 @app.route('/custom_combinations')
